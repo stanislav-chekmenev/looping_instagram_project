@@ -14,7 +14,7 @@ I found 1886 images using that function and downloaded them from Instagram. The 
 
 - The images were classified and sorted into different output directories "output/with_people" and "output/no_people". You can either load the sorted images using the links in the output folder or run the classification yourself with the function "identify_people". It took me one hour to process 100 pictures on a CPU.
 
-- The test accuracy of the classifier is ...
+- The accuracy of the classifier is 96% tested on 100 images.
 
 ### Technical requirements.
 
@@ -22,7 +22,23 @@ I found 1886 images using that function and downloaded them from Instagram. The 
 
 ```r
 install.packages("keras")
+```
 
+- Then you should run two following lines to really install Keras and Tensorflow with a CPU version.
+
+```r
+library(keras)
+install_keras()
+```
+This should be enough for R.
+
+- I'm not sure if you need to install python libraries on your computer to run the python scripts or _reticulate_ will run in in anyway, since keras was already installed with all needed dependencies. Anyway, if the scripts can't be run here is the requirements for Python libraries. 
+
+    - Python 3.6
+    - Tensorflow
+    - Keras
+    
+ 
 
 
 
