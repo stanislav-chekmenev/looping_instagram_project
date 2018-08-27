@@ -1,2 +1,5 @@
-# looping_instagram_project
-A classifier to identify people in instagram images
+# A classifier to identify people in instagram images for Looping Power Room
+
+Hello, Matthias! 
+
+
