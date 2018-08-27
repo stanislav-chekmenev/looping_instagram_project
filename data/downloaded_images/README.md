@@ -1,4 +1,4 @@
-If you want, you can load the images from here:
+* If you want, you can load the images from here:
 
 https://drive.google.com/open?id=1BQslZKnIeXTtBzf9KxXUrEDrMEZBjanf
 
