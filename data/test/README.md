@@ -1,6 +1,6 @@
 This is the folder to test the classifier. 
 
-Please, copy the follwoing folders into this directories if you wish to run the accuracy test yourself. 
+Please, copy the follwoing folders into this directory if you wish to run the accuracy test yourself. 
 
 * There is the link for the images with people:
 
