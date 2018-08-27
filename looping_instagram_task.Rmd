@@ -1,0 +1,283 @@
+---
+title: "Looping Data Science Test"
+author: "Stanislav Chekmenev"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_notebook:
+    df_print: paged
+    fig_height: 5
+    fig_width: 11
+    toc: yes
+    toc_depth: 4
+    toc_float: no
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '4'
+---
+
+```{r setup, include=FALSE}
+setwd(getwd())
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(tidyverse)
+library(data.table)
+library(rvest)
+library(reticulate)
+library(keras)
+library(tensorflow)
+
+# Let me run a script to import require libraries for Python scripts
+source_python("python_scripts/import_libs.py")
+```
+
+### Data extraction from Instagram
+
+```{r}
+data_path <- file.path(getwd(),"data/TaggingTool_Export2017_1.csv")
+dt_dat <- fread(data_path, stringsAsFactors = T)
+summary(dt_dat)
+```
+
+Since, we're interested only in the posts from Instagram, let's clean everything, delete all unused columns and leave only 3:  channel, content_type and link.
+
+```{r}
+dt_dat <- dt_dat %>%
+  select(channel, content_type, link) %>%
+  filter(channel == "INSTAGRAM") %>%
+  droplevels %>%
+  data.table
+
+# Display all content types and the number of their appearances
+dt_dat %>% 
+  count(content_type) %>% 
+  arrange(desc(n))
+```
+
+Since "image" and "IMAGE" types comprise 90% of the data, I'll delete all other for simplicity.
+
+```{r}
+links <- dt_dat %>% 
+  filter(content_type %in% c("image","IMAGE")) %>% 
+  select(link) %>% 
+  droplevels %>% 
+  sapply(levels) %>% 
+  as.character
+```
+
+Below are 2 simple functions that utilize rvest package and the function "purrr::possibly" to continue execution on error.
+
+
+```{r}
+# Define a scraper function
+get_img_url <- function(link) {
+  
+  # Read a html page from a URL
+  img_url <- read_html(link) %>% 
+    # Choose nodes with the CSS selector "meta"
+    html_nodes("meta") %>% 
+    # Choose only those, which have the attribute "content"
+    html_attr(name = "content") %>% 
+    # Transform into a data.table
+    as.data.table %>%
+    # Search for an image with the extension .jpg
+    filter(grepl(".jpg",.)) %>% 
+    as.character
+  
+  return(img_url)
+}
+
+# Define a function to download images
+load_images_on_disk <- function(links, save_dir) {
+
+  # Add an error handler function 
+  # Sometimes a link is no longer valid or there's a typo in it, 
+  # so I want to avoid any breaks in the for-loop (lapply) and simply move further and use NA for those not valid URLs
+  get_img_url_new <- possibly(get_img_url, otherwise = NA)
+  
+  # Scrape instagram links to identify actual urls of images
+  img_urls <- links %>% lapply(get_img_url_new)
+  
+  # Delete any NA links if they exist
+  img_urls <- img_urls[!(is.na(img_urls))]
+  
+  # Download files and store them on disk
+  invisible(
+    seq(1:length(img_urls)) %>% 
+      lapply(function(i){
+        download.file(img_urls[[i]], destfile = paste0(save_dir,"image_",i,".jpeg"), quiet = T)
+      })
+   )
+    
+  # Close all connections
+  on.exit(closeAllConnections())
+  
+  return(print("Images succesfully loaded"))
+  
+}
+```
+
+
+I'll apply this function and will download all images from the listed links. It takes around 50 minutes, so I'll comment out this part.
+
+```{r}
+# load_images_on_disk(links = links, save_dir = file.path(getwd(),"data/downloaded_images/"))
+```
+
+### Training a classifier
+
+The approach is going to be the following:
+
+* I will download an object detection model YOLOv2, the one before the latest version of YOLO, and transform it from Darknet format into keras format. The instructions how to do that can be found [here](https://github.com/allanzelener/YAD2K). 
+* That pretrained model is used to identify people in the images. If there is a person, an image is sorted into the directory "data/with_people" and "data/no_people" otherwise and a log file is written to "logs/yolo_output_log.csv"
+* There might be some installation issues of python packages. If it happens, I can try to help.
+
+I've done the required steps for model transformation and I saved the model and some required data in "model_data" directory. 
+
+```{r}
+yolov2 <- load_model_hdf5("model_data/yolov2.hdf5")
+```
+
+Here is the model summary, its architecture:
+
+```{r}
+yolov2
+```
+
+YOLO takes an input tensor of the shape c(1,608,608,3), where 3 is the number of RGB channels and 1 is the number of batches (can be anything) and transforms it into the output tensor. The output tensor has a probability to detect an object of one of the 80 YOLO classes in each of the 5 anchor boxes in each grid cell of an image, it has the coordinates of the detection boxes and their width and height, too. The output is not simple to use, that's why one needs 5 helper functions to transform the output into something meaningfu, using two main concepts: intersection over union, which helps to delete the overlapping boxes and avoid multiple detections of the same object, and non-max-suppression that removes the boxes with low detection probability. The functions are written in python bythe creator of the YOLO algorithm, so I'm going to use reticulate package to source them and I will rewrite some of them a little bit to make them work in R and to make the output as we need it.
+
+Let me source the python scripts in R environment. 
+
+```{r, warning=F}
+# The script to read the classes and anchors of the yoloV2 model
+source_python("python_scripts/get_classes_anchors.py")
+
+# The script to transform the initial output of the yoloV2 model and get 
+# boxes coordinates, heights, widths, confidences of detection and 
+# probabilities for each class.
+source_python("python_scripts/yolo_head.py")
+
+# The script to filter out the boxes with low threshold probability (by default it's set to 0.3m though it's a tunable parameter)
+source_python("python_scripts/yolo_filter_boxes.py")
+
+# The script to transfor the output of the model to boxes coordinates
+source_python("python_scripts/yolo_boxes_to_cornenrs.py")
+
+# The script to evaluate the model's output and return the final boxes coordinates, probability scores of detection an object and classes of detected objects.
+source_python("python_scripts/yolo_eval.py")
+
+```
+
+I will run the script "get_classes_anchors.py" to extract the classes and anchors for YOLO model from "yad2k/model_data/" directory.
+
+```{r}
+classes_anchors <- get_classes_anchors(classes_path = "model_data/coco_classes.txt", anchors_path = "model_data/yolo_anchors.txt")
+```
+
+Everything is almost ready, the last step is to preprocess the images but it will be done in the prediction loop of the function you will find below. This function takes as its input an image directory, loads the images from there, preprocesses them, makes predictions for object detection, sorts the images in 2 folders ("with_people" and "no_people") and writes a log file with image names and associated labels (0,1).
+
+```{r}
+identify_people <- function(model, classes, anchors, image_dir, log_dir, output_dir_with_people, output_dir_no_people, verbose = T) {
+  
+  # model is the YOLOv2 model to use for prediction
+  # classes -- the vector of all available prediction classes of YOLOv2 (person, car, bicycle, etc..)
+  # anchors -- coordinates of  the anchor boxes in a format of numpy array
+  # image_dir -- image directory
+  # log_dir -- output log directory
+  # output_dir_with_people -- directory to save images with people
+  # output_dir_no_people -- directory to save images without people
+  # verbose -- if True, print the boxes output coordinates, probability scores and classes to the console, during predictions.
+  
+  # Load all image names
+  images_names <- list.files(image_dir)
+  
+  # Create a data table for a log file
+  log_dt <- data.table(ImageName = character(), Label = integer())
+  
+  # Preprocess and predict 
+  for (i in seq(1,length(images_names))) {
+    
+    print(paste0("Image number ", i, "/", length(images_names), " is being processed..."))
+    # Load and reshape an image
+    img <- image_load(file.path(image_dir,images_names[i]), target_size = c(608,608)) %>% 
+      image_to_array(data_format = "channels_last") %>% 
+      array_reshape(dim = c(1,608,608,3))/255
+    # Predict and transform to a numpy array
+    pred <- model %>% 
+      predict(img) %>% 
+      np_array()
+    # Run a Tensorflow session to use python functions to extract scores, classes and detection probabilities from the prediction
+    with(tf$Session() %as% sess, {
+      yolo_outputs <- yolo_head(feats = pred, anchors = anchors)
+      boxes_scores_classes <- yolo_eval(yolo_outputs = yolo_outputs, image_shape = c(608,608))
+      class_ind <- boxes_scores_classes[[3]]$eval()
+      classes_out <- classes[class_ind + 1]
+      if (verbose) {
+        print(paste0("The boxes coordinates for the image ",i," are:"))
+        print(boxes_scores_classes[[1]]$eval())
+        print("The following classes were detected:")
+        print(classes_out)
+        print("With the respective probabilities:")
+        print(boxes_scores_classes[[2]]$eval())
+      }
+      if ("person" %in% classes_out) {
+        log_dt <- rbind(log_dt, data.table(ImageName = images_names[i], Label = 1))
+        file.copy(from=file.path(image_dir,images_names[i]), to=file.path(output_dir_with_people), overwrite = T, recursive = F, copy.mode = T)
+      } else {
+        log_dt <- rbind(log_dt, data.table(ImageName = images_names[i], Label = 0))
+        file.copy(from=file.path(image_dir,images_names[i]), to=file.path(output_dir_no_people), overwrite = T, recursive = F, copy.mode = T)
+      }
+    })
+    
+  }
+  
+  # Write the log_dt to the log_dir
+  fwrite(log_dt, file = file.path(log_dir, paste0("output_log_",Sys.time())))
+  return(log_dt)
+}
+  
+```
+
+
+I will use a small hand-picked fraction of data to test the classifier. Firstly, I'll extract the pictures' names from 2 test folders and assign true labels to them. There are 50 images with people and 50 images without any.
+
+```{r}
+img_names_people <- list.files("data/test/with_people/")
+img_names_no_people <- list.files("data/test/no_people/")
+test_dt <- data.table(ImageName = c(img_names_no_people, img_names_people), TrueLabel = rep(c(0,1), 1, each = 50))
+```
+
+The images are labled. I'll run them through the function "identify_people" and use the output log data to calculate the accuracy of the classifier. Each image takes around 30 seconds to process, so one need around an hour to classify 100 test pictures, therefore I will comment out this code, too, and will simply load the log file from "logs" directory.
+
+```{r}
+# # Create variables to pass to the function
+# model <- yolov2
+# classes <- classes_anchors[[1]]
+# anchors <- classes_anchors[[2]]
+# image_dir <- "data/test/test_images_unsorted/"
+# log_dir <- "logs/"
+# output_dir_with_people <- "output/with_people/"
+# output_dir_no_people <- "output/no_people/"
+# 
+# # Run the classifier
+# output_log_dt <- identify_people(model = model, classes = classes, anchors = anchors, image_dir = image_dir, 
+#                                  log_dir = log_dir, output_dir_with_people = output_dir_with_people, output_dir_no_people = output_dir_no_people,
+#                                  verbose = T)
+
+
+# Load the pretrained output log
+output_log_dt <- fread("logs/output_log_2018-08-27 16:23:34")
+```
+
+Now we can calculate the accuracy.
+
+```{r}
+# Accuracy
+print(
+  test_dt %>% 
+    merge(output_log_dt, by = "ImageName") %>% 
+    mutate(Prediction = ifelse(TrueLabel == Label, T, F)) %>% 
+    summarise(Accuracy = paste0("Accuracy is ", sum(Prediction), "%")) %>% 
+    as.character
+)
+```
+
