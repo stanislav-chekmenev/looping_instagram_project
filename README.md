@@ -6,7 +6,7 @@ The task is done. I already wrote you the short version of the strategy I was us
 
 ### Approach
 
-- I wrotea simple function that scrapes images from Instagram, using the links you provided me with. The function names is "load_images_on_disk" and it's inside the looping_instagram_task.Rmd file.
+- I wrote a simple function that scrapes images from Instagram, using the links you provided me with. The function names is "load_images_on_disk" and it's inside the looping_instagram_task.Rmd file.
 
 I found 1886 images using that function and downloaded them from Instagram. The link to the images is in "data/downloaded_images" directory. You can download them, but I use only 100 images from there to test the model. The links to the test images and the README document with the instructions are in the "data/test" directory.
 
