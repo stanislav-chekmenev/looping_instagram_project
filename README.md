@@ -32,7 +32,7 @@ install_keras()
 ```
 This should be enough for R.
 
-- I'm not sure if you need to install python libraries on your computer to run the python scripts or _reticulate_ will run in in anyway, since keras was already installed with all needed dependencies. Anyway, if the scripts can't be run here is the requirements for Python libraries. 
+- I'm not sure if you need to install python libraries on your computer to run the python scripts or _reticulate_ will run them anyway, since keras was already installed with all needed dependencies. Anyway, if the scripts can't be run here is the requirements for Python libraries. 
 
     - Python 3.6
     - Tensorflow
